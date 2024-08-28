@@ -57,7 +57,11 @@
         "vector": "cpp",
         "algorithm": "cpp",
         "fstream": "cpp",
-        "map": "cpp"
+        "map": "cpp",
+        "deque": "cpp",
+        "queue": "cpp",
+        "stack": "cpp",
+        "codecvt": "cpp"
     },
     "editor.formatOnSave": true
 }

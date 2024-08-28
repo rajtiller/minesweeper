@@ -21,6 +21,10 @@
 #include <queue>
 #include <termios.h>
 #include <unistd.h> // For STDIN_FILENO
+#include <locale>
+#include <codecvt>
+
+// const std::string BOMB_CHAR = "\033[31mB\033[0m";
 
 enum MineType
 {
@@ -47,7 +51,7 @@ struct Board
     {
         diffifulty = 4.72 * std::pow(size, 0.243) / 100;
     }
-    void get_first_square(std::pair<int, int> &coord)
+    void get_first_square(std::pair<int, int> coord)
     {
         static std::random_device rd;
         static std::mt19937 gen(rd());
@@ -107,17 +111,54 @@ struct Board
                     }
                 }
             }
-            curr_mine->perceived_type=SAFE;
+            curr_mine->perceived_type = SAFE;
+        }
+        make_string_mine_field();
+    }
+    void make_string_mine_field()
+    {
+        string_mine_field += std::string(int(149 / 2.0 - 5.5), ' ') + "MINESWEEPER\n";
+        string_mine_field += std::string(int(149 / 2.0 - board_size/2.0), ' ') + std::string(board_size, '-') + '\n';
+        for (std::vector<Mine> &row : mine_field)
+        {
+            string_mine_field += std::string(int(149 / 2.0 -board_size / 2), ' ');
+            for (Mine &m : row)
+            {
+                if (m.adjacent_bombs)
+                {
+                    string_mine_field += ' ';
+                }
+                else if (m.perceived_type == SAFE)
+                {
+                    string_mine_field += std::to_string(m.adjacent_bombs);
+                }
+                else
+                {
+                    string_mine_field += '?';
+                }
+            }
+            string_mine_field += '\n';
         }
     }
     bool update_square(std::pair<int, int> &coord, int action)
     { // 1 means reveal, 2 means cover up
+        Mine &m = mine_field[coord.first][coord.second];
+        int string_inx = int(164 + (149-board_size)/2 + (151+board_size)/2*int(coord.first) + int(coord.second));
+        if (action == 2)
+        {
+            string_mine_field[string_inx] = 'B';
+        }
+    }
+    void print_all_mines()
+    {
+        std::cout << string_mine_field;
     }
     std::vector<std::vector<Mine>> mine_field;
     int board_size;
     double diffifulty; // Maybe change later
     int num_mines;
     int perceived_num_mines_left;
+    std::string string_mine_field;
 };
 
 // Function to configure terminal to read input without Enter
@@ -137,12 +178,10 @@ void disableRawMode()
     term.c_lflag |= (ICANON | ECHO);         // Enable canonical mode and echo
     tcsetattr(STDIN_FILENO, TCSANOW, &term); // Set terminal attributes
 }
-void print_all_mines(Board &b)
-{
-}
 
 int main()
 {
+    std::wcout.imbue(std::locale("en_US.UTF-8"));
     int board_size = 15;
     // std::cout << "What size board would you like? (2-130)\nBoard size: ";
     // std::cin >> board_size;
@@ -158,7 +197,14 @@ int main()
     //     }
     //     std::cin >> board_size;
     // }
+    std::string BOMB_CHAR = "\033[31mB\033[0m";
+    std::cout << BOMB_CHAR;
+    BOMB_CHAR[0]='X';
+    std::cout<<BOMB_CHAR;
     Board b(board_size);
-
-    print_all_mines(b);
+    b.get_first_square({6,6});
+    b.print_all_mines();
+    b.string_mine_field[729] = 'X';
+    b.print_all_mines();
+    // b.print_all_mines();
 };

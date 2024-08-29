@@ -24,15 +24,55 @@
 #include <locale>
 #include <codecvt>
 #include <cassert>
+#include <thread> // For std::this_thread::sleep_for
+#include <chrono> // For std::chrono::seconds
 
-// const std::string BOMB_CHAR = "\033[31mB\033[0m";
+const std::string BOMB_CHAR = "\033[31mB\033[0m";
+const std::string RESET_COLOR = "\033[0m";
 
+const std::string BLACK = "\033[30m";
+const std::string RED = "\033[31m";
+const std::string GREEN = "\033[32m";
+const std::string YELLOW = "\033[33m";
+const std::string BLUE = "\033[34m";
+const std::string MAGENTA = "\033[35m";
+const std::string CYAN = "\033[36m";
+const std::string WHITE = "\033[37m";
+
+const std::string BRIGHT_BLACK = "\033[90m";
+const std::string BRIGHT_RED = "\033[91m";
+const std::string BRIGHT_GREEN = "\033[92m";
+const std::string BRIGHT_YELLOW = "\033[93m";
+const std::string BRIGHT_BLUE = "\033[94m";
+const std::string BRIGHT_MAGENTA = "\033[95m";
+const std::string BRIGHT_CYAN = "\033[96m";
+const std::string BRIGHT_WHITE = "\033[97m";
 enum MineType
 {
     UNKNOWN = 0,
     BOMB = 1,
     SAFE = 2,
 };
+
+
+// Function to configure terminal to read input without Enter
+void enableRawMode()
+{
+    struct termios term;
+    tcgetattr(STDIN_FILENO, &term);          // Get current terminal attributes
+    term.c_lflag &= ~(ICANON | ECHO);        // Disable canonical mode and echo
+    tcsetattr(STDIN_FILENO, TCSANOW, &term); // Set terminal attributes
+}
+
+// Function to restore terminal settings
+void disableRawMode()
+{
+    struct termios term;
+    tcgetattr(STDIN_FILENO, &term);          // Get current terminal attributes
+    term.c_lflag |= (ICANON | ECHO);         // Enable canonical mode and echo
+    tcsetattr(STDIN_FILENO, TCSANOW, &term); // Set terminal attributes
+}
+
 
 struct Mine
 {
@@ -162,13 +202,13 @@ struct Board
         {
             for (Mine &m : row)
             {
-                if (m.actual_type)
+                if (m.actual_type == BOMB && m.perceived_type != SAFE)
                 {
-                    this->num_bombs++;
+                    this->perceived_num_bombs_left++;
                 }
-                if (m.perceived_type == SAFE)
+                if (m.actual_type == SAFE && m.perceived_type != SAFE)
                 {
-                    this->perceived_num_bombs_left--;
+                    perceived_num_safe_squares++;
                 }
             }
         }
@@ -235,10 +275,10 @@ struct Board
         int string_size = 12 + std::log10(perceived_num_bombs_left);
         last_line = std::string(string_size, ' ') + "Bombs Left: " + std::to_string(perceived_num_bombs_left) + "\nSquare: ";
     }
-    void move_blinker() {
-        
+    void move_blinker()
+    {
     }
-    bool make_move(std::pair<int, int> &coord, char action)
+    bool make_move(std::pair<int, int> coord, char action)
     { // 1 means reveal, 2 means cover up
         Mine &m = mine_field[coord.first][coord.second];
         int string_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(coord.first) + int(coord.second));
@@ -246,19 +286,23 @@ struct Board
         {
             string_mine_field[string_inx] = 'B';
             perceived_num_bombs_left--;
+            mine_field[coord.first][coord.second].perceived_type = BOMB;
             int string_size = 12 + std::log10(perceived_num_bombs_left);
-            last_line = std::string(string_size, ' ') + "Bombs Left: " + std::to_string(perceived_num_bombs_left) + "\nSquare: ";
+            last_line = std::string((149 - string_size) / 2, ' ') + "Bombs Left: " + std::to_string(perceived_num_bombs_left) + "\nSquare: ";
         }
         else
         {
             if (mine_field[coord.first][coord.second].actual_type == BOMB)
             {
+                mine_field[coord.first][coord.second].perceived_type = SAFE;
                 print_game_losing_message();
                 return true;
             }
             else
             {
+                mine_field[coord.first][coord.second].perceived_type = SAFE;
                 string_mine_field[string_inx] = mine_field[coord.first][coord.second].adjacent_bombs;
+                this->perceived_num_safe_squares--;
             }
         }
         return false;
@@ -270,57 +314,138 @@ struct Board
     }
     void print_game_losing_message()
     {
+        // for (size_t row = board_size - 1; row != 0; row--)
+        // {
+        //     for (size_t col = board_size - 1; col != 0; col--)
+        //     {
+        //         int string_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(row) + int(col));
+        //         if (mine_field[row][col].actual_type == BOMB && mine_field[row][col].perceived_type == SAFE)
+        //         {
+        //             string_mine_field.erase(string_inx);
+        //             string_mine_field.insert(string_inx, BOMB_CHAR);
+        //         }
+        //         else if (mine_field[row][col].actual_type == BOMB && mine_field[row][col].perceived_type == UNKNOWN) {
+        //             string_mine_field.erase(string_inx);
+        //             std::string replacement = YELLOW + "B" + RESET_COLOR;
+        //             string_mine_field.insert(string_inx, replacement);
+        //         }
+        //         else if (mine_field[row][col].actual_type == BOMB && mine_field[row][col].perceived_type == BOMB) {
+        //             string_mine_field.erase(string_inx);
+        //             std::string replacement = RED + "B" + RESET_COLOR;
+        //             string_mine_field.insert(string_inx, replacement);
+        //         } else if (mine_field[row][col].actual_type == SAFE && mine_field[row][col].perceived_type == BOMB) {
+        //             string_mine_field.erase(string_inx);
+        //             std::string replacement = GREEN + "B" + RESET_COLOR;
+        //             string_mine_field.insert(string_inx,  replacement);
+        //         }
+        //     }
+        // }
+        std::cout << string_mine_field;
+    }
+    void play_game(int &curr_row, int &curr_col)
+    {
+        enableRawMode();
+        int important_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(curr_row) + int(curr_col));
+        char &to_store = string_mine_field[important_inx];
+        char to_store_copy = to_store;
+        char c;
+        ssize_t nread = read(STDIN_FILENO, &c, 1);
+        int counter = 0;
+        while (this->perceived_num_safe_squares != 0)
+        {
+            counter++;
+            counter %= 5000;
+            if (counter > 2500)
+            {
+                to_store = '#';
+            }
+            else
+            {
+                to_store = to_store_copy;
+            }
+
+            nread = read(STDIN_FILENO, &c, 1);
+            if (nread == -1)
+                continue;
+            else if (c == '\x1b')
+            { // Escape character detected
+                char seq[2];
+                if (read(STDIN_FILENO, &seq[0], 1) == 0)
+                    continue;
+                if (read(STDIN_FILENO, &seq[1], 1) == 0)
+                    continue;
+                if (seq[0] == '[')
+                {
+                    switch (seq[1])
+                    {
+                    case 'A':
+                        curr_row = std::max(curr_row - 1, 0);
+                        break;
+                    case 'B':
+                        curr_row = std::min(board_size - 1, curr_row + 1);
+                        break;
+                    case 'C':
+                        curr_col = std::min(board_size - 1, curr_col + 1);
+                        break;
+                    case 'D':
+                        curr_col = std::max(0, curr_col - 1);
+                        break;
+                    default:
+                        assert(false);
+                    }
+                }
+                else if (c == 'd')
+                {
+                    make_move({curr_row, curr_col}, 'd');
+                }
+                else if (c == 's')
+                {
+                    make_move({curr_row, curr_col}, 's');
+                }
+            }
+        }
+        disableRawMode();
     }
     std::vector<std::vector<Mine>> mine_field;
     int board_size;
     double diffifulty; // Maybe change later
-    int num_bombs;
+    int perceived_num_safe_squares;
     int perceived_num_bombs_left;
     std::string string_mine_field;
     std::string last_line;
 };
 
-// Function to configure terminal to read input without Enter
-void enableRawMode()
-{
-    struct termios term;
-    tcgetattr(STDIN_FILENO, &term);          // Get current terminal attributes
-    term.c_lflag &= ~(ICANON | ECHO);        // Disable canonical mode and echo
-    tcsetattr(STDIN_FILENO, TCSANOW, &term); // Set terminal attributes
-}
-
-// Function to restore terminal settings
-void disableRawMode()
-{
-    struct termios term;
-    tcgetattr(STDIN_FILENO, &term);          // Get current terminal attributes
-    term.c_lflag |= (ICANON | ECHO);         // Enable canonical mode and echo
-    tcsetattr(STDIN_FILENO, TCSANOW, &term); // Set terminal attributes
-}
-
 int main()
 {
     std::wcout.imbue(std::locale("en_US.UTF-8"));
     std::cout << "\033[1m";
-    int board_size = 15;
-    // std::cout << "What size board would you like? (2-130)\nBoard size: ";
-    // std::cin >> board_size;
-    // while (board_size < 2 || board_size > 130)
-    // {
-    //     if (board_size < 2)
-    //     {
-    //         std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
-    //     }
-    //     else
-    //     {
-    //         std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
-    //     }
-    //     std::cin >> board_size;
-    // }
+    int board_size;
+    int curr_row = 0;
+    int curr_col = 0;
+    std::cout << "What size board would you like? (2-130)\nBoard size: ";
+    std::cin >> board_size;
+    while (board_size < 2 || board_size > 130)
+    {
+        if (board_size < 2)
+        {
+            std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
+        }
+        else
+        {
+            std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
+        }
+        std::cin >> board_size;
+    }
     Board b(board_size);
-    b.get_first_square(8, 8);
+    std::cout << "\n\nChoose your starting square: ";
+    std::cin >> curr_row >> curr_col;
+    b.get_first_square(curr_row, curr_col);
     b.print_mine_field();
+    std::cout << "\nPick a square and an action: ";
+    char action;
+    std::cin >> curr_row >> curr_col >> action;
+    b.make_move({curr_row, curr_col}, action);
+    // b.start_game();
     std::cout << "\033[0m";
-    // b.print_all_mines();
     return 0;
 };

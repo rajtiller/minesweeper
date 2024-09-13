@@ -61,7 +61,8 @@
         "deque": "cpp",
         "queue": "cpp",
         "stack": "cpp",
-        "codecvt": "cpp"
+        "codecvt": "cpp",
+        "thread": "cpp"
     },
     "editor.formatOnSave": true
 }

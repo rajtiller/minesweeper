@@ -54,7 +54,6 @@ enum MineType
     SAFE = 2,
 };
 
-
 // Function to configure terminal to read input without Enter
 void enableRawMode()
 {
@@ -73,16 +72,16 @@ void disableRawMode()
     tcsetattr(STDIN_FILENO, TCSANOW, &term); // Set terminal attributes
 }
 
-
 struct Mine
 {
-    Mine() : actual_type(UNKNOWN), perceived_type(UNKNOWN), adjacent_bombs(0)
+    Mine() : actual_type(UNKNOWN), perceived_type(UNKNOWN), adjacent_revealed(0), adjacent_bombs(0)
     {
         adjacent_mines.resize(8);
     }
     std::pair<int, int> coords;
     MineType actual_type;
     MineType perceived_type;
+    int adjacent_revealed;
     int adjacent_bombs;                 // <=10 for bombs
     std::vector<Mine *> adjacent_mines; // 0 1 2
                                         // 7   3
@@ -131,6 +130,10 @@ struct Board
                 mine_field[row][col].adjacent_mines[5] = (row == board_size - 1) ? nullptr : &mine_field[row + 1][col];
                 mine_field[row][col].adjacent_mines[6] = (row == board_size - 1 || col == 0) ? nullptr : &mine_field[row + 1][col - 1];
                 mine_field[row][col].adjacent_mines[7] = (col == 0) ? nullptr : &mine_field[row][col - 1];
+                std::vector<Mine*> &curr_adj_mines = mine_field[row][col].adjacent_mines;
+                curr_adj_mines.erase(std::remove_if(curr_adj_mines.begin(), curr_adj_mines.end(), [](Mine *m)
+                                                    { return m == nullptr; }),
+                                     curr_adj_mines.end());
             }
         }
         for (std::vector<Mine> &row : mine_field)
@@ -210,9 +213,30 @@ struct Board
                 {
                     perceived_num_safe_squares++;
                 }
+                if (m.perceived_type == BOMB || m.perceived_type == SAFE)
+                {
+                    for (Mine *mine_ptr : m.adjacent_mines)
+                    {
+                        mine_ptr->adjacent_revealed++;
+                    }
+                }
             }
         }
-        make_string_mine_field();
+        // find edges
+        this->print_mine_field();
+        std::cout << std::flush;
+        for (std::vector<Mine> &row : mine_field)
+        {
+            for (Mine &m : row)
+            {
+                if (m.adjacent_revealed > 2 && m.perceived_type == UNKNOWN)
+                {
+                    edge_mines.push_back(m);
+                }
+            }
+        }
+        this->print_mine_field();
+        std::cout << std::flush;
     }
     void fix_potential_right_diagonal_zero(int row, int col)
     {
@@ -273,22 +297,31 @@ struct Board
             string_mine_field += '\n';
         }
         int string_size = 12 + std::log10(perceived_num_bombs_left);
-        last_line = std::string(string_size, ' ') + "Bombs Left: " + std::to_string(perceived_num_bombs_left) + "\nSquare: ";
-    }
-    void move_blinker()
-    {
+        last_line = std::string(string_size, ' ') + "Bombs Left: " + std::to_string(perceived_num_bombs_left) + "\n";
     }
     bool make_move(std::pair<int, int> coord, char action)
     { // 1 means reveal, 2 means cover up
         Mine &m = mine_field[coord.first][coord.second];
         int string_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(coord.first) + int(coord.second));
+        if (m.perceived_type == BOMB || m.perceived_type == SAFE)
+        {
+            assert(false);
+        }
+        for (Mine *adj_mine : m.adjacent_mines)
+        {
+            adj_mine->adjacent_revealed++;
+            if (adj_mine->adjacent_revealed == 3)
+            {
+                edge_mines.push_back(*adj_mine);
+            }
+        }
         if (action == 'd')
         {
             string_mine_field[string_inx] = 'B';
             perceived_num_bombs_left--;
             mine_field[coord.first][coord.second].perceived_type = BOMB;
             int string_size = 12 + std::log10(perceived_num_bombs_left);
-            last_line = std::string((149 - string_size) / 2, ' ') + "Bombs Left: " + std::to_string(perceived_num_bombs_left) + "\nSquare: ";
+            last_line = std::string((149 - string_size) / 2, ' ') + "Bombs Left: " + std::to_string(perceived_num_bombs_left) + "\n";
         }
         else
         {
@@ -346,24 +379,14 @@ struct Board
     {
         enableRawMode();
         int important_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(curr_row) + int(curr_col));
-        char &to_store = string_mine_field[important_inx];
-        char to_store_copy = to_store;
+        char *to_store = &string_mine_field[important_inx];
+        char to_store_copy = *to_store;
+        *to_store = '#';
         char c;
-        ssize_t nread = read(STDIN_FILENO, &c, 1);
-        int counter = 0;
+        ssize_t nread;
         while (this->perceived_num_safe_squares != 0)
         {
-            counter++;
-            counter %= 5000;
-            if (counter > 2500)
-            {
-                to_store = '#';
-            }
-            else
-            {
-                to_store = to_store_copy;
-            }
-
+            std::cout << string_mine_field << "\n\n";
             nread = read(STDIN_FILENO, &c, 1);
             if (nread == -1)
                 continue;
@@ -380,15 +403,35 @@ struct Board
                     {
                     case 'A':
                         curr_row = std::max(curr_row - 1, 0);
+                        *to_store = to_store_copy;
+                        important_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(curr_row) + int(curr_col));
+                        to_store = &string_mine_field[important_inx];
+                        to_store_copy = *to_store;
+                        *to_store = '#';
                         break;
                     case 'B':
                         curr_row = std::min(board_size - 1, curr_row + 1);
+                        *to_store = to_store_copy;
+                        important_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(curr_row) + int(curr_col));
+                        to_store = &string_mine_field[important_inx];
+                        to_store_copy = *to_store;
+                        *to_store = '#';
                         break;
                     case 'C':
                         curr_col = std::min(board_size - 1, curr_col + 1);
+                        *to_store = to_store_copy;
+                        important_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(curr_row) + int(curr_col));
+                        to_store = &string_mine_field[important_inx];
+                        to_store_copy = *to_store;
+                        *to_store = '#';
                         break;
                     case 'D':
                         curr_col = std::max(0, curr_col - 1);
+                        *to_store = to_store_copy;
+                        important_inx = int(164 + (149 - board_size) / 2 + (151 + board_size) / 2 * int(curr_row) + int(curr_col));
+                        to_store = &string_mine_field[important_inx];
+                        to_store_copy = *to_store;
+                        *to_store = '#';
                         break;
                     default:
                         assert(false);
@@ -406,46 +449,203 @@ struct Board
         }
         disableRawMode();
     }
+    void solve_one_iteration()
+    {
+        std::stack<Mine> unsolvable_mines;
+        while (!edge_mines.empty())
+        {
+            Mine &curr_mine = (is_queue) ? edge_mines.front() : edge_mines.back();
+            if (is_queue)
+            {
+                edge_mines.pop_front();
+            }
+            else
+            {
+                edge_mines.pop_back();
+            }
+            std::vector<Mine> adjacent_revealed_squares;
+            for (Mine *m : curr_mine.adjacent_mines)
+            {
+                if (m->perceived_type == SAFE)
+                {
+                    adjacent_revealed_squares.push_back(*m);
+                }
+            }
+            std::set<std::pair<int, int>> edges_set;
+            for (Mine m : adjacent_revealed_squares)
+            {
+                for (Mine *mine_ptr : m.adjacent_mines)
+                {
+                    if (mine_ptr->perceived_type == UNKNOWN)
+                    {
+                        edges_set.insert({mine_ptr->coords});
+                    }
+                }
+            }
+            std::vector<std::pair<int, int>> edges; // For purpose of random access
+            std::vector<Mine> edges_copy;
+            for (std::pair<int, int> p : edges_set)
+            {
+                edges.push_back(p);
+                edges_copy.push_back(this->mine_field[p.first][p.second]);
+            }
+            std::vector<int> valid_combinations;
+            Board copy = *this;
+            for (int i = 0; i < std::pow(2, edges.size()); i++)
+            {
+                for (int inx = 0; inx < edges.size(); inx++)
+                {
+                    Mine &curr_edge_mine = this->mine_field[edges[inx].first][edges[inx].second];
+                    curr_edge_mine.actual_type = ((0b1 >> inx) & i) ? BOMB : SAFE; // BOMB == 1
+                }
+                bool valid = true;
+                for (Mine &m : adjacent_revealed_squares)
+                {
+                    if (m.actual_type == BOMB)
+                    {
+                        continue;
+                    }
+                    int actual_num_adjacent_bombs = 0;
+                    for (Mine *adj_mine : m.adjacent_mines)
+                    {
+                        if (adj_mine->actual_type == BOMB)
+                        {
+                            actual_num_adjacent_bombs++;
+                        }
+                    }
+                    if (actual_num_adjacent_bombs != m.adjacent_bombs)
+                    {
+                        valid = false;
+                    }
+                }
+                if (valid)
+                {
+                    valid_combinations.push_back(i);
+                }
+            }
+            std::vector<int> safe_squares;   // guaranteed to be safe
+            std::vector<int> deadly_squares; // guaranteed to be bombs
+            int all_ones = std::pow(2, edges.size()) - 1;
+            int all_zeros = 0;
+            for (int i : valid_combinations)
+            {
+                all_ones &= i;
+                all_zeros |= i;
+            }
+            for (int inx = 0; inx < edges.size(); inx++)
+            {
+                if ((0b1 >> inx) & all_ones)
+                {
+                    safe_squares.push_back(inx);
+                }
+                else if (!((0b1 >> inx) & all_zeros))
+                {
+                    deadly_squares.push_back(inx);
+                }
+            }
+            if (!safe_squares.empty())
+            {
+                for (size_t i = 0; i < edges_copy.size(); i++)
+                {
+                    this->mine_field[edges[i].first][edges[i].second] = edges_copy[i];
+                }
+                make_move(edges[safe_squares[0]], 's');
+                return;
+            }
+            else if (!deadly_squares.empty())
+            {
+                for (size_t i = 0; i < edges_copy.size(); i++)
+                {
+                    this->mine_field[edges[i].first][edges[i].second] = edges_copy[i];
+                }
+                make_move(edges[deadly_squares[0]], 'd');
+                return;
+            }
+            // once done changing edges, change back
+            for (size_t i = 0; i < edges_copy.size(); i++)
+            {
+                this->mine_field[edges[i].first][edges[i].second] = edges_copy[i];
+            }
+        }
+    }
+    void play_game_infinite()
+    {
+        enableRawMode();
+        char c;
+        ssize_t nread;
+        bool auto_enabled = false;
+        while (true)
+        {
+
+            nread = read(STDIN_FILENO, &c, 1);
+            if (auto_enabled)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                solve_one_iteration();
+                continue;
+            }
+            else if (nread == -1)
+            {
+                continue;
+            }
+            else if (c == 'q')
+            {
+                auto_enabled = false;
+                solve_one_iteration();
+            }
+            else if (c == 'a')
+            { // Escape character detected
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                solve_one_iteration();
+            }
+            else if (c == ' ')
+            {
+                solve_one_iteration();
+            }
+        }
+    }
     std::vector<std::vector<Mine>> mine_field;
+    std::deque<Mine> edge_mines;
     int board_size;
     double diffifulty; // Maybe change later
     int perceived_num_safe_squares;
     int perceived_num_bombs_left;
     std::string string_mine_field;
     std::string last_line;
+    bool is_queue;
 };
 
 int main()
 {
     std::wcout.imbue(std::locale("en_US.UTF-8"));
     std::cout << "\033[1m";
-    int board_size;
-    int curr_row = 0;
-    int curr_col = 0;
-    std::cout << "What size board would you like? (2-130)\nBoard size: ";
-    std::cin >> board_size;
-    while (board_size < 2 || board_size > 130)
-    {
-        if (board_size < 2)
-        {
-            std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
-        }
-        else
-        {
-            std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
-        }
-        std::cin >> board_size;
-    }
+    int board_size = 6;
+    int curr_row = 3;
+    int curr_col = 3;
+    // std::cout << "What size board would you like? (2-130)\nBoard size: ";
+    // std::cin >> board_size;
+    // while (board_size < 2 || board_size > 130)
+    // {
+    //     if (board_size < 2)
+    //     {
+    //         std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
+    //     }
+    //     else
+    //     {
+    //         std::cout << board_size << " is too small, choose a number between 2 and 130.\nBoard size: ";
+    //     }
+    //     std::cin >> board_size;
+    // }
     Board b(board_size);
-    std::cout << "\n\nChoose your starting square: ";
-    std::cin >> curr_row >> curr_col;
+    // std::cout << "\n\nChoose your starting square: ";
+    // std::cin >> curr_row >> curr_col;
+    std::cout << "Queue (q) or Stack (s)?\n"; // Maybe add other data structures like priority heap to see how that changes things
+    // char q_or_s;
+    // std::cin >> q_or_s;
+    // b.is_queue = (q_or_s == 'q') ? true : false;
+    b.is_queue = true;
     b.get_first_square(curr_row, curr_col);
-    b.print_mine_field();
-    std::cout << "\nPick a square and an action: ";
-    char action;
-    std::cin >> curr_row >> curr_col >> action;
-    b.make_move({curr_row, curr_col}, action);
-    // b.start_game();
+    b.play_game_infinite();
     std::cout << "\033[0m";
     return 0;
 };
